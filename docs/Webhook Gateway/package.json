@@ -1,0 +1,27 @@
+{
+  "name": "omnichannel-webhook-gateway",
+  "version": "1.0.0",
+  "description": "High-throughput webhook receiver for omnichannel platform",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "LOG_LEVEL=debug node --watch server.js",
+    "test": "jest --runInBand",
+    "test:coverage": "jest --coverage"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.4",
+    "express": "^4.19.2",
+    "pino": "^9.3.2",
+    "redis": "^4.7.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "pino-pretty": "^11.2.2",
+    "supertest": "^7.0.0"
+  }
+}

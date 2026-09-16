@@ -1,0 +1,412 @@
+import { useEffect, useState } from 'react';
+import api from '../../lib/api';
+import toast from 'react-hot-toast';
+import { getSocket } from '../../lib/socket';
+
+type CampaignStatus = 'draft' | 'scheduled' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+
+interface Campaign {
+  id: string;
+  name: string;
+  status: CampaignStatus;
+  total_recipients: number;
+  sent_count: number;
+  delivered_count: number;
+  failed_count: number;
+  started_at: string | null;
+  completed_at: string | null;
+  channel?: { name: string; channel_type: string };
+}
+
+const STATUS_STYLE: Record<CampaignStatus, string> = {
+  draft:      'bg-gray-100 text-gray-600',
+  scheduled:  'bg-blue-100 text-blue-600',
+  running:    'bg-green-100 text-green-700',
+  paused:     'bg-yellow-100 text-yellow-700',
+  completed:  'bg-indigo-100 text-indigo-700',
+  failed:     'bg-red-100 text-red-700',
+  cancelled:  'bg-gray-100 text-gray-400',
+};
+
+const STATUS_LABEL: Record<CampaignStatus, string> = {
+  draft:     'Draft',
+  scheduled: 'Terjadwal',
+  running:   'Berjalan',
+  paused:    'Dijeda',
+  completed: 'Selesai',
+  failed:    'Gagal',
+  cancelled: 'Dibatalkan',
+};
+
+export default function BroadcastPage() {
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [selected, setSelected]   = useState<Campaign | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+
+  useEffect(() => {
+    api.get('/campaigns').then((r) => setCampaigns(r.data.data ?? r.data)).finally(() => setLoading(false));
+
+    // Real-time progress updates
+    const sock = getSocket();
+    const handler = (data: { campaign_id: string; sent: number; delivered: number; failed: number; total: number }) => {
+      setCampaigns((prev) =>
+        prev.map((c) =>
+          c.id === data.campaign_id
+            ? { ...c, sent_count: data.sent, delivered_count: data.delivered, failed_count: data.failed }
+            : c
+        )
+      );
+      if (selected?.id === data.campaign_id) {
+        setSelected((prev) => prev ? { ...prev, sent_count: data.sent, delivered_count: data.delivered, failed_count: data.failed } : prev);
+      }
+    };
+    sock.on('broadcast:progress', handler);
+    return () => { sock.off('broadcast:progress', handler); };
+  }, []);
+
+  const action = async (id: string, act: 'launch' | 'pause' | 'resume' | 'cancel') => {
+    await api.post(`/campaigns/${id}/${act}`);
+    const newStatus: Record<string, CampaignStatus> = {
+      launch: 'running', pause: 'paused', resume: 'running', cancel: 'cancelled',
+    };
+    setCampaigns((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, status: newStatus[act] ?? c.status } : c))
+    );
+    toast.success(`Campaign di-${act === 'launch' ? 'launch' : act === 'pause' ? 'pause' : act === 'resume' ? 'resume' : 'cancel'}`);
+  };
+
+  if (showCreate) {
+    return <CreateCampaignWizard onDone={(c) => { setCampaigns((prev) => [c, ...prev]); setShowCreate(false); }} onCancel={() => setShowCreate(false)} />;
+  }
+
+  return (
+    <div className="flex h-full overflow-hidden">
+      {/* Campaign list */}
+      <div className={`${selected ? 'w-1/2' : 'flex-1'} flex flex-col border-r border-gray-200 overflow-hidden`}>
+        <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-white">
+          <h1 className="text-lg font-bold text-gray-900">Broadcast Campaign</h1>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 transition"
+          >
+            + Buat Campaign
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto bg-gray-50">
+          {loading ? (
+            <p className="text-center text-sm text-gray-400 mt-8">Memuat...</p>
+          ) : campaigns.length === 0 ? (
+            <div className="text-center py-16 text-gray-400">
+              <p className="text-lg mb-2">Belum ada campaign</p>
+            </div>
+          ) : (
+            <table className="w-full text-sm bg-white">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Nama</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Progress</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {campaigns.map((c) => {
+                  const pct = c.total_recipients > 0
+                    ? Math.round((c.sent_count / c.total_recipients) * 100)
+                    : 0;
+                  return (
+                    <tr
+                      key={c.id}
+                      onClick={() => setSelected(c)}
+                      className="hover:bg-gray-50 cursor-pointer"
+                    >
+                      <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${STATUS_STYLE[c.status]}`}>
+                          {STATUS_LABEL[c.status]}
+                          {c.status === 'running' && <span className="ml-1 animate-pulse">●</span>}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {c.total_recipients > 0 ? (
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 bg-gray-200 rounded-full h-1.5 min-w-[80px]">
+                              <div className="bg-brand-500 h-1.5 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="text-xs text-gray-500">{pct}%</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
+                          {c.status === 'draft' && (
+                            <button onClick={() => action(c.id, 'launch')} className="text-xs text-green-600 hover:underline">Launch</button>
+                          )}
+                          {c.status === 'running' && (
+                            <button onClick={() => action(c.id, 'pause')} className="text-xs text-yellow-600 hover:underline">Pause</button>
+                          )}
+                          {c.status === 'paused' && (
+                            <>
+                              <button onClick={() => action(c.id, 'resume')} className="text-xs text-green-600 hover:underline">Resume</button>
+                              <button onClick={() => action(c.id, 'cancel')} className="text-xs text-red-500 hover:underline">Cancel</button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* Campaign detail */}
+      {selected && (
+        <div className="flex-1 overflow-y-auto bg-white">
+          <CampaignDetail campaign={selected} onClose={() => setSelected(null)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CampaignDetail({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
+  const pct = campaign.total_recipients > 0
+    ? Math.round((campaign.sent_count / campaign.total_recipients) * 100)
+    : 0;
+
+  return (
+    <div className="p-6">
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">{campaign.name}</h2>
+          <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${STATUS_STYLE[campaign.status]}`}>
+            {STATUS_LABEL[campaign.status]}
+          </span>
+        </div>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">×</button>
+      </div>
+
+      {/* Progress bar */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
+          <span>{campaign.sent_count.toLocaleString()} / {campaign.total_recipients.toLocaleString()} terkirim</span>
+          <span>{pct}%</span>
+        </div>
+        <div className="bg-gray-200 rounded-full h-3">
+          <div className="bg-brand-500 h-3 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+
+      {/* Stats cards */}
+      <div className="grid grid-cols-4 gap-3 mb-6">
+        {[
+          { label: 'Total', value: campaign.total_recipients, color: 'text-gray-900' },
+          { label: 'Terkirim', value: campaign.sent_count, color: 'text-green-600' },
+          { label: 'Diterima', value: campaign.delivered_count, color: 'text-blue-600' },
+          { label: 'Gagal', value: campaign.failed_count, color: 'text-red-600' },
+        ].map((s) => (
+          <div key={s.label} className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
+            <p className={`text-2xl font-bold ${s.color}`}>{s.value.toLocaleString()}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{s.label}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CreateCampaignWizard({ onDone, onCancel }: { onDone: (c: Campaign) => void; onCancel: () => void }) {
+  const [step, setStep]     = useState(1);
+  const [form, setForm]     = useState({
+    name: '',
+    channel_id: '',
+    audience_type: 'all' as const,
+    audience_config: {},
+    scheduled_at: '',
+    rate_limit_per_minute: 60,
+  });
+  const [channels, setChannels] = useState<Array<{ id: string; name: string; channel_type: string }>>([]);
+  const [saving, setSaving]   = useState(false);
+
+  useEffect(() => {
+    api.get('/channels').then((r) => setChannels(r.data?.data ?? r.data ?? [])).catch(() => {});
+  }, []);
+
+  const submit = async () => {
+    setSaving(true);
+    try {
+      const { data } = await api.post('/campaigns', form);
+      onDone(data);
+      toast.success('Campaign dibuat');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto p-6">
+      <div className="flex items-center gap-4 mb-6">
+        {[1, 2, 3, 4].map((s) => (
+          <div key={s} className={`flex items-center gap-1 text-sm ${step >= s ? 'text-brand-600 font-medium' : 'text-gray-400'}`}>
+            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= s ? 'bg-brand-600 text-white' : 'bg-gray-200 text-gray-500'}`}>{s}</span>
+            {s === 1 ? 'Info' : s === 2 ? 'Audience' : s === 3 ? 'Jadwal' : 'Review'}
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        {step === 1 && (
+          <div className="space-y-4">
+            <h3 className="font-semibold text-gray-900">Info Campaign</h3>
+            <div>
+              <label className="text-sm text-gray-600 mb-1 block">Nama Campaign</label>
+              <input
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="Promo Lebaran 2026"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-gray-600 mb-1 block">Channel</label>
+              <select
+                value={form.channel_id}
+                onChange={(e) => setForm((f) => ({ ...f, channel_id: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none"
+              >
+                <option value="">Pilih channel</option>
+                {channels.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.channel_type})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm text-gray-600 mb-1 block">Rate Limit (pesan/menit)</label>
+              <input
+                type="number"
+                value={form.rate_limit_per_minute}
+                onChange={(e) => setForm((f) => ({ ...f, rate_limit_per_minute: Number(e.target.value) }))}
+                min={1} max={120}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+              />
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-4">
+            <h3 className="font-semibold text-gray-900">Audience</h3>
+            {(['all', 'tag', 'segment', 'upload'] as const).map((type) => (
+              <label key={type} className="flex items-center gap-3 cursor-pointer border border-gray-200 rounded-lg p-3 hover:border-brand-300">
+                <input
+                  type="radio"
+                  name="audience_type"
+                  value={type}
+                  checked={form.audience_type === type}
+                  onChange={() => setForm((f) => ({ ...f, audience_type: type }))}
+                  className="accent-brand-600"
+                />
+                <div>
+                  <p className="text-sm font-medium text-gray-700 capitalize">
+                    {type === 'all' ? 'Semua Contact' : type === 'tag' ? 'Berdasarkan Tag' : type === 'segment' ? 'Segment Dinamis' : 'Upload CSV'}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    {type === 'all' ? 'Kirim ke semua contact aktif'
+                      : type === 'tag' ? 'Filter berdasarkan tag contact'
+                      : type === 'segment' ? 'Kriteria custom berdasarkan field contact'
+                      : 'Upload file CSV berisi daftar penerima'}
+                  </p>
+                </div>
+              </label>
+            ))}
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="space-y-4">
+            <h3 className="font-semibold text-gray-900">Jadwal Pengiriman</h3>
+            <label className="flex items-center gap-3 cursor-pointer border border-gray-200 rounded-lg p-3 hover:border-brand-300">
+              <input
+                type="radio"
+                name="schedule"
+                checked={!form.scheduled_at}
+                onChange={() => setForm((f) => ({ ...f, scheduled_at: '' }))}
+                className="accent-brand-600"
+              />
+              <div>
+                <p className="text-sm font-medium text-gray-700">Kirim Sekarang</p>
+                <p className="text-xs text-gray-400">Campaign akan langsung dijalankan setelah di-launch</p>
+              </div>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer border border-gray-200 rounded-lg p-3 hover:border-brand-300">
+              <input
+                type="radio"
+                name="schedule"
+                checked={!!form.scheduled_at}
+                onChange={() => setForm((f) => ({ ...f, scheduled_at: new Date(Date.now() + 3600000).toISOString().slice(0, 16) }))}
+                className="accent-brand-600"
+              />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-700">Jadwalkan</p>
+                {form.scheduled_at && (
+                  <input
+                    type="datetime-local"
+                    value={form.scheduled_at}
+                    onChange={(e) => setForm((f) => ({ ...f, scheduled_at: e.target.value }))}
+                    className="mt-1 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none"
+                  />
+                )}
+              </div>
+            </label>
+          </div>
+        )}
+
+        {step === 4 && (
+          <div className="space-y-3">
+            <h3 className="font-semibold text-gray-900">Review & Launch</h3>
+            <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-gray-500">Nama</span><span className="font-medium">{form.name}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Channel</span><span>{channels.find((c) => c.id === form.channel_id)?.name ?? '—'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Audience</span><span className="capitalize">{form.audience_type}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Jadwal</span><span>{form.scheduled_at || 'Sekarang'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Rate limit</span><span>{form.rate_limit_per_minute} msg/menit</span></div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-between mt-4">
+        <button
+          onClick={step === 1 ? onCancel : () => setStep((s) => s - 1)}
+          className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2"
+        >
+          {step === 1 ? 'Batal' : 'Kembali'}
+        </button>
+        {step < 4 ? (
+          <button
+            onClick={() => setStep((s) => s + 1)}
+            disabled={step === 1 && (!form.name || !form.channel_id)}
+            className="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 transition disabled:opacity-40"
+          >
+            Lanjut
+          </button>
+        ) : (
+          <button
+            onClick={submit}
+            disabled={saving}
+            className="bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg px-4 py-2 transition disabled:opacity-40"
+          >
+            {saving ? 'Memproses...' : 'Launch Campaign'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}

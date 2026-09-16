@@ -1,0 +1,30 @@
+{
+  "name": "omniclick-webhook-gateway",
+  "version": "1.0.0",
+  "description": "High-throughput webhook receiver for OmniClick omnichannel platform",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "cross-env LOG_LEVEL=debug NODE_ENV=development node --watch server.js",
+    "test": "cross-env NODE_ENV=test jest --runInBand",
+    "test:coverage": "cross-env NODE_ENV=test jest --coverage --runInBand"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.4",
+    "express": "^4.19.2",
+    "mssql": "^11.0.1",
+    "pino": "^9.3.2",
+    "redis": "^4.7.0",
+    "sanitize-html": "^2.13.1",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "jest": "^29.7.0",
+    "pino-pretty": "^11.2.2",
+    "supertest": "^7.0.0"
+  }
+}

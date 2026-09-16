@@ -1,0 +1,23 @@
+# ── OS & Editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Secrets — JANGAN PERNAH commit .env ───────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Node.js (gateway, realtime-server, frontend) ──────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
